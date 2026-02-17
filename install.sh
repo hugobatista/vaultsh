@@ -43,14 +43,23 @@ header() {
 	echo ""
 }
 
-# Check if we're in the right directory
-if [[ ! -f "vault.sh" ]]; then
-	error "vault.sh not found in current directory"
-	error "Please run this installer from the vaultsh project directory"
-	exit 1
-fi
-
 header "vaultsh Installer"
+
+REPO_URL="https://go.hugobatista.com/gh/vaultsh"
+REPO_DIR="vaultsh-repo-$$"
+CLEANUP_REPO=false
+
+# Check if we're in the right directory or need to clone the repo
+if [[ ! -f "vault.sh" ]]; then
+	info "Cloning vaultsh repository..."
+	if ! git clone --depth 1 "$REPO_URL" "$REPO_DIR" 2>/dev/null; then
+		error "Failed to clone repository. Make sure git is installed."
+		exit 1
+	fi
+	cd "$REPO_DIR"
+	CLEANUP_REPO=true
+	success "Repository cloned"
+fi
 
 # Check for bash
 info "Checking for bash..."
@@ -188,3 +197,9 @@ echo "For more information, see: ${CYAN}README.md${RESET}"
 echo ""
 
 success "Happy secure coding! 🔐"
+
+# Cleanup temporary repo if it was cloned
+if [[ "$CLEANUP_REPO" == true ]]; then
+	cd ..
+	rm -rf "$REPO_DIR"
+fi

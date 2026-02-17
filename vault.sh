@@ -7,6 +7,7 @@ set -euo pipefail
 # Default configuration
 secrets_file=".env"
 app_name=$(basename "$PWD")
+use_fd=false  # Use file descriptor instead of temp file
 
 # Setup colored output for terminal
 color_on=""
@@ -23,6 +24,8 @@ while [[ $# -gt 0 ]]; do
       secrets_file="$2"; shift 2 ;;
     --app|-a)
       app_name="$2"; shift 2 ;;
+    --use-fd)
+      use_fd=true; shift ;;
     --help|-h)
       cat << 'EOF'
 Usage: vaultsh [OPTIONS] COMMAND [ARGS...]
@@ -33,13 +36,14 @@ avoiding the need to store .env files on disk.
 Options:
   --file FILE, -f FILE    Secrets file path (default: .env)
   --app APP, -a APP       Keyring app identifier (default: current folder name)
+  --use-fd                Use file descriptor instead of temp file (no disk I/O)
   --help, -h              Show this help message
 
 How it works:
   1. If secrets file exists locally → use it directly
-  2. Otherwise, load from keyring (app name) → create temporary file
+  2. Otherwise, load from keyring (app name) → create temporary file (or FD with --use-fd)
   3. Execute your command with SECRETS_FILE environment variable set
-  4. Automatically delete temporary file after execution
+  4. Automatically delete temporary file after execution (not needed with --use-fd)
 
 Examples:
   vaultsh uv run pywrangler dev
@@ -54,10 +58,18 @@ Examples:
   vaultsh --app myproject-prod npm start
     Uses specific keyring entry for production secrets
 
+  vaultsh --use-fd act --secret-file "$SECRETS_FILE"
+    No disk I/O - secrets passed via file descriptor (/dev/fd/N)
+
+  vaultsh --use-fd docker run --env-file "$SECRETS_FILE" myimage
+    Load env vars from FD without creating temporary file
+
 Advanced:
   - Create <secrets-file>.keep (e.g., .env.keep) to prevent auto-deletion
-  - SECRETS_FILE env var is set to the file path for your command
+  - SECRETS_FILE env var is set to the file path (or /dev/fd/N with --use-fd)
   - First run prompts for secrets and stores them in keyring automatically
+  - --use-fd mode: No disk writes, but requires command support for file descriptors
+    (won't work with shell sourcing or tools requiring regular files)
 
 EOF
       exit 0 ;;
@@ -72,8 +84,9 @@ info() {
 }
 
 # Cleanup function: removes secrets file unless .keep file exists
+# No cleanup needed in FD mode (file descriptor auto-closes)
 cleanup() {
-  if [[ -f "$secrets_file" && ! -e "${secrets_file}.keep" ]]; then
+  if [[ "$use_fd" == "false" ]] && [[ -f "$secrets_file" && ! -e "${secrets_file}.keep" ]]; then
     rm -f "$secrets_file"
     info "✓ $secrets_file deleted after run"
   fi
@@ -97,7 +110,11 @@ if [[ -f "$secrets_file" ]]; then
 fi
 
 # Load secrets from keyring
-info "Loading secrets for app='$app_name' → $secrets_file..."
+if [[ "$use_fd" == "true" ]]; then
+  info "Loading secrets for app='$app_name' (FD mode - no disk I/O)..."
+else
+  info "Loading secrets for app='$app_name' → $secrets_file..."
+fi
 
 # Check for required dependency
 if ! command -v secret-tool >/dev/null 2>&1; then
@@ -109,10 +126,18 @@ if ! command -v secret-tool >/dev/null 2>&1; then
 fi
 
 # Try to load secrets from keyring
-if secret-tool lookup app "$app_name" > "$secrets_file" 2>/dev/null; then
-  # Set restrictive permissions on secrets file
-  chmod 600 "$secrets_file"
-  info "✓ Loaded from keyring ($(wc -l < "$secrets_file") lines)"
+secrets_content=""
+if secrets_content=$(secret-tool lookup app "$app_name" 2>/dev/null) && [[ -n "$secrets_content" ]]; then
+  line_count=$(echo "$secrets_content" | wc -l)
+  
+  if [[ "$use_fd" == "true" ]]; then
+    info "✓ Loaded from keyring ($line_count lines)"
+  else
+    # Write to file with secure permissions
+    echo "$secrets_content" > "$secrets_file"
+    chmod 600 "$secrets_file"
+    info "✓ Loaded from keyring ($(wc -l < "$secrets_file") lines)"
+  fi
 else
   # Secrets not found in keyring - prompt user to provide them
 	info "⚠ No secrets found for app='$app_name' in keyring."
@@ -129,10 +154,22 @@ else
 	label="Secrets for $app_name"
 	
 	if echo "$secrets_input" | secret-tool store --label "$label" app "$app_name"; then
-		# Retrieve from keyring and write to file with secure permissions
-		secret-tool lookup app "$app_name" > "$secrets_file"
-		chmod 600 "$secrets_file"
-		info "✓ Stored in keyring as '$label' ($(wc -l < "$secrets_file") lines)"
+		# Retrieve from keyring
+		if secrets_content=$(secret-tool lookup app "$app_name" 2>/dev/null); then
+			line_count=$(echo "$secrets_content" | wc -l)
+			
+			if [[ "$use_fd" == "true" ]]; then
+				info "✓ Stored in keyring as '$label' ($line_count lines)"
+			else
+				# Write to file with secure permissions
+				echo "$secrets_content" > "$secrets_file"
+				chmod 600 "$secrets_file"
+				info "✓ Stored in keyring as '$label' ($(wc -l < "$secrets_file") lines)"
+			fi
+		else
+			echo "Error: Failed to retrieve secrets from keyring. Aborting." >&2
+			exit 1
+		fi
 	else
 		echo "Error: Failed to store secrets in keyring. Aborting." >&2
 		exit 1
@@ -141,4 +178,17 @@ fi
 
 # Execute the command with SECRETS_FILE environment variable
 info "→ Running: $*"
-SECRETS_FILE="$secrets_file" "$@"
+
+if [[ "$use_fd" == "true" ]]; then
+  # Use file descriptor mode - no disk I/O
+  # Open FD 9 for reading from secrets content (using heredoc to avoid ps exposure)
+  exec 9< <(cat <<< "$secrets_content")
+  SECRETS_FILE="/dev/fd/9" "$@"
+  exec_status=$?
+  # Close the file descriptor
+  exec 9<&-
+  exit $exec_status
+else
+  # Use file mode - traditional temp file approach
+  SECRETS_FILE="$secrets_file" "$@"
+fi
