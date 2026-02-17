@@ -110,7 +110,8 @@ done
 trap cleanup EXIT INT TERM
 
 # If secrets file already exists locally, use it directly (no keyring needed)
-if [[ -f "$secrets_file" ]]; then
+# Skip this check when using file descriptors, as we'll provide via /dev/fd/9
+if [[ "$use_fd" == "false" ]] && [[ -f "$secrets_file" ]]; then
   info "ℹ Using existing local file: $secrets_file"
   info "→ Running: $*"
   SECRETS_FILE="$secrets_file" "$@"
