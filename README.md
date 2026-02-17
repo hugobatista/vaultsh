@@ -19,7 +19,7 @@ Do this (secrets from keyring):
 vaultsh python app.py
 ```
 
-**Under the hood:** vaultsh retrieves your secrets from the system keyring (encrypted and managed by the OS), creates a temporary file with secure permissions only your process can read, passes it to your command, and deletes it immediately after—leaving no trace on disk.
+**Under the hood:** vaultsh retrieves your secrets from the system keyring (encrypted and managed by the OS) through secret-tool, creates a temporary file with secure permissions only your process can read, passes it to your command, and deletes it immediately after—leaving no trace on disk.
 
 
 ## Prerequisites
@@ -33,6 +33,7 @@ vaultsh python app.py
 
 ### One-liner (Recommended)
 
+Installs vaultsh user locally to `~/.local/bin`:
 ```bash
 curl -fsSL https://go.hugobatista.com/ghraw/vaultsh/main/install.sh | sh
 ```
