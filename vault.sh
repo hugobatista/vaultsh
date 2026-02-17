@@ -4,6 +4,8 @@ set -euo pipefail
 # vaultsh - Execute commands with secrets from keyring, avoiding .env files on disk
 # Automatically loads secrets from keyring, creates temporary .env, and cleans up
 
+version="0.1.0"
+
 # Default configuration
 secrets_file=".env"
 app_name=$(basename "$PWD")
@@ -25,10 +27,10 @@ while [[ $# -gt 0 ]]; do
     --app|-a)
       app_name="$2"; shift 2 ;;
     --help|-h)
-      cat << 'EOF'
+      cat << EOF
 Usage: vaultsh [OPTIONS] COMMAND [ARGS...]
 
-vaultsh executes commands with secrets loaded from your system keyring,
+vaultsh $version - Execute commands with secrets loaded from your system keyring,
 avoiding the need to store .env files on disk.
 
 Options:
