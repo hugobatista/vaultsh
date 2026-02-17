@@ -104,21 +104,22 @@ echo "  1) ${BOLD}System-wide${RESET}  → /usr/local/bin/vaultsh (requires sudo
 echo "  2) ${BOLD}User-local${RESET}   → ~/.local/bin/vaultsh (no sudo needed)"
 echo ""
 
+INSTALL_DIR=""
+NEEDS_SUDO=""
+
 # Check if we're in interactive mode
 if [[ -t 0 ]]; then
 	# Fully interactive: stdin is a terminal
-	while true; do
+	while [[ -z "$INSTALL_DIR" ]]; do
 		read -p "Enter choice [1-2]: " choice
 		case $choice in
 			1)
 				INSTALL_DIR="/usr/local/bin"
 				NEEDS_SUDO=true
-				break 2
 				;;
 			2)
 				INSTALL_DIR="$HOME/.local/bin"
 				NEEDS_SUDO=false
-				break 2
 				;;
 			*)
 				warning "Invalid choice. Please enter 1 or 2."
